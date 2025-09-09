@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Comparison Tool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #1a73e8;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            background-color: white;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        input[type="file"] {
+            border: 1px solid #ccc;
+            display: inline-block;
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 0.25rem;
+        }
+
+        button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background-color 0.3s;
+        }
+        
+        button#summarize-btn {
+            background-color: #34a853;
+        }
+
+        button:hover {
+            background-color: #155ab6;
+        }
+        
+        button#summarize-btn:hover {
+             background-color: #2c8c42;
+        }
+
+        .comparison-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .pdf-view {
+            border: 1px solid #ddd;
+            padding: 1rem;
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            flex: 1;
+            min-width: 300px;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+            max-width: 100%;
+            height: auto;
+        }
+
+        .summary-container {
+            width: 100%;
+            max-width: 1200px;
+            margin-top: 1rem;
+            background-color: white;
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .summary-container h2 {
+            margin-top: 0;
+            color: #1a73e8;
+        }
+        
+        .summary-output {
+            white-space: pre-wrap;
+            line-height: 1.6;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PDF Comparison Tool</h1>
+        <div class="controls">
+            <input type="file" id="file1">
+            <input type="file" id="file2">
+            <button id="compare-btn">Compare</button>
+            <button id="summarize-btn" style="display: none;">✨ Summarize Differences</button>
+        </div>
+        <div class="comparison-area">
+            <div class="pdf-view">
+                <h2>PDF 1</h2>
+                <canvas id="pdf-canvas1"></canvas>
+            </div>
+            <div class="pdf-view">
+                <h2>PDF 2</h2>
+                <canvas id="pdf-canvas2"></canvas>
+            </div>
+            <div class="pdf-view">
+                <h2>Differences</h2>
+                <canvas id="diff-canvas"></canvas>
+            </div>
+        </div>
+        <div id="summary-container" class="summary-container" style="display: none;">
+            <h2>Summary of Differences</h2>
+            <div id="summary-output" class="summary-output"></div>
+        </div>
+    </div>
+
+    <script>
+        const file1Input = document.getElementById('file1');
+        const file2Input = document.getElementById('file2');
+        const compareBtn = document.getElementById('compare-btn');
+        const summarizeBtn = document.getElementById('summarize-btn');
+        const summaryContainer = document.getElementById('summary-container');
+        const summaryOutput = document.getElementById('summary-output');
+        const pdfCanvas1 = document.getElementById('pdf-canvas1');
+        const pdfCanvas2 = document.getElementById('pdf-canvas2');
+        const diffCanvas = document.getElementById('diff-canvas');
+
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+
+        compareBtn.addEventListener('click', () => {
+            const file1 = file1Input.files[0];
+            const file2 = file2Input.files[0];
+
+            if (file1 && file2) {
+                if (file1.type !== 'application/pdf' || file2.type !== 'application/pdf') {
+                    alert('Please select valid PDF files.');
+                    return;
+                }
+                
+                Promise.all([
+                    renderPdf(file1, pdfCanvas1),
+                    renderPdf(file2, pdfCanvas2)
+                ]).then(() => {
+                    comparePdfs();
+                    summarizeBtn.style.display = 'inline-block';
+                    summaryContainer.style.display = 'none';
+                }).catch(error => {
+                    console.error("Failed to render one or both PDFs.", error);
+                });
+
+            } else {
+                alert('Please select two PDF files to compare.');
+            }
+        });
+
+        summarizeBtn.addEventListener('click', async () => {
+            const file1 = file1Input.files[0];
+            const file2 = file2Input.files[0];
+
+            if (!file1 || !file2) {
+                alert("Please select two files first.");
+                return;
+            }
+
+            summaryContainer.style.display = 'block';
+            summaryOutput.textContent = 'Analyzing differences...';
+            summarizeBtn.disabled = true;
+
+            try {
+                const [text1, text2] = await Promise.all([
+                    extractTextFromPdf(file1),
+                    extractTextFromPdf(file2)
+                ]);
+
+                await getSummaryFromGemini(text1, text2);
+
+            } catch (error) {
+                summaryOutput.textContent = 'An error occurred while generating the summary.';
+                console.error("Summarization error:", error);
+            } finally {
+                 summarizeBtn.disabled = false;
+            }
+        });
+
+        async function getSummaryFromGemini(text1, text2) {
+            const apiKey = ""; // API key is handled by the environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            
+            const userQuery = `You are a helpful assistant that specializes in comparing documents.
+Please summarize the key differences between the two following texts.
+Focus on additions, removals, and significant changes in content. Ignore minor formatting changes.
+Provide the summary in a clear, easy-to-read format.
+
+DOCUMENT 1:
+---
+${text1}
+---
+
+DOCUMENT 2:
+---
+${text2}
+---
+`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+            };
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API call failed with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const summary = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (summary) {
+                    summaryOutput.textContent = summary;
+                } else {
+                    summaryOutput.textContent = "Could not generate a summary from the response.";
+                }
+
+            } catch (error) {
+                console.error('Error calling Gemini API:', error);
+                summaryOutput.textContent = 'Failed to connect to the summarization service.';
+            }
+        }
+
+
+        async function extractTextFromPdf(file) {
+            const fileReader = new FileReader();
+            return new Promise((resolve, reject) => {
+                fileReader.onload = async function() {
+                    const typedarray = new Uint8Array(this.result);
+                    try {
+                        const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                        let fullText = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            const pageText = textContent.items.map(item => item.str).join(' ');
+                            fullText += pageText + '\n\n';
+                        }
+                        resolve(fullText);
+                    } catch (error) {
+                         reject(error);
+                    }
+                };
+                fileReader.readAsArrayBuffer(file);
+            });
+        }
+
+
+        async function renderPdf(file, canvas) {
+            const fileReader = new FileReader();
+
+            return new Promise((resolve, reject) => {
+                fileReader.onload = function() {
+                    const typedarray = new Uint8Array(this.result);
+                    pdfjsLib.getDocument({ data: typedarray }).promise.then(pdf => {
+                        pdf.getPage(1).then(page => {
+                            const viewport = page.getViewport({ scale: 1.5 });
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+
+                            const renderContext = {
+                                canvasContext: context,
+                                viewport: viewport
+                            };
+                            page.render(renderContext).promise.then(resolve);
+                        });
+                    }).catch(error => {
+                        alert(`Error parsing ${file.name}. Please ensure it is a valid PDF file.`);
+                        console.error(error);
+                        reject(error);
+                    });
+                };
+                fileReader.readAsArrayBuffer(file);
+            });
+        }
+
+        function comparePdfs() {
+            const ctx1 = pdfCanvas1.getContext('2d');
+            const ctx2 = pdfCanvas2.getContext('2d');
+            const diffCtx = diffCanvas.getContext('2d');
+
+            const width = Math.max(pdfCanvas1.width, pdfCanvas2.width);
+            const height = Math.max(pdfCanvas1.height, pdfCanvas2.height);
+
+            diffCanvas.width = width;
+            diffCanvas.height = height;
+            
+            diffCtx.drawImage(pdfCanvas1, 0, 0);
+
+            const imgData1 = ctx1.getImageData(0, 0, pdfCanvas1.width, pdfCanvas1.height);
+            const imgData2 = ctx2.getImageData(0, 0, pdfCanvas2.width, pdfCanvas2.height);
+            
+            diffCtx.globalCompositeOperation = 'difference';
+            diffCtx.drawImage(pdfCanvas2, 0, 0);
+            
+             // Optional: highlight differences more strongly
+            const diffImageData = diffCtx.getImageData(0, 0, width, height);
+            const data = diffImageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // if there is a difference, make it bright red
+                if (data[i] > 10 || data[i+1] > 10 || data[i+2] > 10) {
+                    data[i] = 255;    // red
+                    data[i + 1] = 0;  // green
+                    data[i + 2] = 0;  // blue
+                }
+            }
+            diffCtx.putImageData(diffImageData, 0, 0);
+        }
+    </script>
+</body>
+</html>
+
